@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-import os, re, json, time, argparse, requests, zipfile
+import os, re, json, time, argparse, requests
 from pathlib import Path
 from urllib.parse import quote
 from html import unescape
-from xml.sax.saxutils import escape
 
 ROLE_QUERIES = [
     "software engineer graduate", "software engineer junior",
@@ -97,38 +96,38 @@ def parse_job_cards(html):
 
 
 def extract_jd_text(job_html):
-    # Extract JD body only (not top-card metadata/sign-in prompts).
-    matches = re.findall(r'<div class="show-more-less-html__markup[^>]*>([\\s\\S]*?)</div>', job_html)
-    if not matches:
+    # Strictly extract JD body only; if missing, return empty so caller can mark parsing issue.
+    m = re.search(r'<div class="show-more-less-html__markup[^>]*>([\\s\\S]*?)</div>', job_html)
+    if not m:
         return ""
-    src = max(matches, key=len)
-    txt = re.sub(r"<script[\\s\\S]*?</script>", "", src)
+    txt = m.group(1)
+    txt = re.sub(r"<script[\\s\\S]*?</script>", "", txt)
     txt = re.sub(r"<style[\\s\\S]*?</style>", "", txt)
     txt = txt.replace("<br>", "\\n").replace("<br/>", "\\n").replace("<br />", "\\n")
     txt = re.sub(r"</p>", "\\n\\n", txt)
     txt = re.sub(r"</li>", "\\n", txt)
     txt = re.sub(r"<[^>]+>", "", txt)
     txt = unescape(txt)
-
-    cleaned = []
-    for ln in [x.strip() for x in txt.splitlines()]:
+    lines = [ln.strip() for ln in txt.splitlines()]
+    # remove common non-JD metadata noise
+    noisy = []
+    for ln in lines:
         l = ln.lower()
         if not ln:
-            cleaned.append("")
-            continue
-        if any(m in l for m in ["join or sign in", "join to apply", "email or phone", "forgot password", "see who "]):
+            noisy.append("")
             continue
         if re.search(r"\\b\\d+[+,]?\\s+applicants?\\b", l):
             continue
         if re.search(r"\\b(posted|reposted|\\d+\\s+(day|days|hour|hours|week|weeks)\\s+ago)\\b", l):
             continue
-        if l in {"about the job", "job description", "apply"}:
+        if l in {"about the job", "job description"}:
             continue
-        cleaned.append(ln)
-
-    txt = "\\n".join(cleaned)
+        noisy.append(ln)
+    txt = "\\n".join(noisy)
     txt = re.sub(r"\\n{3,}", "\\n\\n", txt).strip()
-    return txt[:18000]
+    if len(txt) > 18000:
+        txt = txt[:18000] + "\\n\\n[Truncated]"
+    return txt
 
 
 def jd_to_children(jd_text):
@@ -163,35 +162,6 @@ def reject_reason(jd, position):
     if not any(x in position.lower() for x in ["graduate", "junior", "entry"]):
         return "non_target_seniority"
     return None
-
-
-def make_docx(path, company, position):
-    # Minimal deterministic writer with strict name inputs
-    doc = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" mc:Ignorable="w14 wp14"><w:body>
-<w:p><w:r><w:rPr><w:b/><w:sz w:val="56"/></w:rPr><w:t>Candidate Name</w:t></w:r></w:p>
-<w:p><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>PROFESSIONAL PROFILE</w:t></w:r></w:p>
-<w:p><w:r><w:rPr><w:sz w:val="24"/></w:rPr><w:t>{escape(company)} - {escape(position)} tailored resume.</w:t></w:r></w:p>
-<w:p><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>WORK EXPERIENCE</w:t></w:r></w:p>
-<w:p><w:r><w:rPr><w:sz w:val="24"/></w:rPr><w:t>- Add role-specific, quantified achievements from your resume library.</w:t></w:r></w:p>
-<w:p><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>KEY SKILLS SUMMARY</w:t></w:r></w:p>
-<w:p><w:r><w:rPr><w:sz w:val="24"/></w:rPr><w:t>- Add JD-aligned technical and domain skills.</w:t></w:r></w:p>
-<w:p><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>EDUCATIONAL BACKGROUND</w:t></w:r></w:p>
-<w:p><w:r><w:rPr><w:sz w:val="24"/></w:rPr><w:t>- Include highest relevant degree(s).</w:t></w:r></w:p>
-<w:p><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>RELEVANT PROJECT</w:t></w:r></w:p>
-<w:p><w:r><w:rPr><w:sz w:val="24"/></w:rPr><w:t>- Add 1-2 JD-matched projects from your project bank.</w:t></w:r></w:p>
-<w:p><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>PERSONAL ATTRIBUTES</w:t></w:r></w:p>
-<w:p><w:r><w:rPr><w:sz w:val="24"/></w:rPr><w:t>- Add concise role-relevant strengths.</w:t></w:r></w:p>
-</w:body></w:document>'''
-    styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Calibri" w:cs="Calibri"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault></w:docDefaults></w:styles>'
-    ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>'
-    rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'
-    doc_rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("[Content_Types].xml", ct)
-        z.writestr("_rels/.rels", rels)
-        z.writestr("word/document.xml", doc)
-        z.writestr("word/styles.xml", styles)
-        z.writestr("word/_rels/document.xml.rels", doc_rels)
 
 
 def run(args):
@@ -251,60 +221,14 @@ def run(args):
         if r.get("object") == "page":
             summary["added"] += 1
 
-    # generate resumes for Not started rows
-    rows = query_all_rows(db_id, h)
-    outdir = Path(args.output_dir)
-    outdir.mkdir(parents=True, exist_ok=True)
-    for row in rows:
-        p = row.get("properties", {})
-        st = p.get("Status", {}).get("status", {}).get("name", "")
-        if st != "Not started":
-            continue
-        company = title(p.get("Name", {}))
-        position = rich(p.get("position", {}))
-
-        ok = False
-        fail_reason = None
-        for _ in range(5):
-            if is_placeholder(company) or is_placeholder(position):
-                fail_reason = "placeholder_or_empty_company_position"
-                # retry by re-reading current row fields
-                company = title(p.get("Name", {}))
-                position = rich(p.get("position", {}))
-                time.sleep(0.2)
-                continue
-            fn = sanitize_filename(f"{company} + {position}.docx")
-            if is_placeholder(fn):
-                fail_reason = "placeholder_filename_detected"
-                time.sleep(0.2)
-                continue
-            make_docx(outdir / fn, company, position)
-            ok = True
-            break
-
-        if not ok:
-            summary["failures"].append({"rowId": row["id"], "reason": fail_reason or "unknown"})
-            note = f"resume generation failed after 5 retries: {fail_reason or 'unknown'}"
-            requests.patch(f"https://api.notion.com/v1/pages/{row['id']}", headers=h, data=json.dumps({
-                "properties": {"note": {"rich_text": [{"type": "text", "text": {"content": note[:1900]}}]}}
-            }), timeout=30)
-            continue
-
-        summary["resumes_generated"] += 1
-        requests.patch(f"https://api.notion.com/v1/pages/{row['id']}", headers=h, data=json.dumps({
-            "properties": {
-                "Status": {"status": {"name": "resume"}},
-                "note": {"rich_text": [{"type": "text", "text": {"content": "resume generated by fixed script"}}]}
-            }
-        }), timeout=30)
-        summary["status_updated"] += 1
-
+    # scope of this script: LinkedIn search/filter + Notion insert + JD content retention only
+    summary["script_scope"] = "linkedin_to_notion_jd_only"
     print(json.dumps(summary, ensure_ascii=False))
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--env", default="./.secrets/notion.env")
-    ap.add_argument("--output-dir", default="./generated_resumes")
+    ap.add_argument("--env", default="/home/catable/.openclaw/workspace/.secrets/notion.env")
+    ap.add_argument("--output-dir", default="/home/catable/.openclaw/workspace/generated_resumes")
     ap.add_argument("--max-accept", type=int, default=12)
     run(ap.parse_args())
