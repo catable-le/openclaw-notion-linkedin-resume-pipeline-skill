@@ -1,0 +1,73 @@
+{
+  "profileName": "example-profile",
+  "notion": {
+    "databaseId": "<notion_database_id>",
+    "fields": {
+      "name": "Name",
+      "status": "Status",
+      "url": "URL",
+      "position": "position",
+      "note": "note"
+    },
+    "statusFlow": {
+      "pending": "Not started",
+      "done": "resume"
+    },
+    "writeJobDescriptionToChildPage": true
+  },
+  "search": {
+    "sources": ["linkedin"],
+    "timeWindowHours": 24,
+    "locations": ["Country/Region", "Preferred City"],
+    "targetRoles": [
+      "Target Role A",
+      "Target Role B",
+      "Target Role C"
+    ],
+    "seniority": ["graduate", "junior"],
+    "exclude": {
+      "phdOnly": true,
+      "citizenshipOrPrOnly": true,
+      "minYearsExperience": 3,
+      "techStackMismatchThreshold": 0.8
+    }
+  },
+  "resume": {
+    "knowledgeBasePaths": ["./data/resume-library.docx"],
+    "maxPages": 2,
+    "atsMode": true,
+    "sectionsOrder": [
+      "Professional Profile",
+      "Work Experience",
+      "Key Skills Summary",
+      "Educational Background",
+      "Relevant Project",
+      "Personal Attributes"
+    ],
+    "formatting": {
+      "font": "Calibri",
+      "heading": "bold 15pt + divider line",
+      "body": "11pt",
+      "points": "dash",
+      "titleDateLayout": "same line, title left date right; org/location next line"
+    },
+    "fileNamePattern": "{Company} - {Position} Resume.docx"
+  },
+  "reporting": {
+    "summaryOnly": true,
+    "channel": "discord",
+    "destination": "channel:<id>",
+    "metrics": [
+      "searchedCount",
+      "filteredInCount",
+      "insertedCount",
+      "resumesGeneratedCount",
+      "statusUpdatedCount",
+      "failures"
+    ]
+  },
+  "schedule": {
+    "cron": "0 20 * * *",
+    "tz": "Etc/UTC"
+  }
+}
