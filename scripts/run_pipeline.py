@@ -96,6 +96,60 @@ def parse_job_cards(html):
     return jobs
 
 
+def extract_jd_text(job_html):
+    # Extract JD body only (not top-card metadata/sign-in prompts).
+    matches = re.findall(r'<div class="show-more-less-html__markup[^>]*>([\\s\\S]*?)</div>', job_html)
+    if not matches:
+        return ""
+    src = max(matches, key=len)
+    txt = re.sub(r"<script[\\s\\S]*?</script>", "", src)
+    txt = re.sub(r"<style[\\s\\S]*?</style>", "", txt)
+    txt = txt.replace("<br>", "\\n").replace("<br/>", "\\n").replace("<br />", "\\n")
+    txt = re.sub(r"</p>", "\\n\\n", txt)
+    txt = re.sub(r"</li>", "\\n", txt)
+    txt = re.sub(r"<[^>]+>", "", txt)
+    txt = unescape(txt)
+
+    cleaned = []
+    for ln in [x.strip() for x in txt.splitlines()]:
+        l = ln.lower()
+        if not ln:
+            cleaned.append("")
+            continue
+        if any(m in l for m in ["join or sign in", "join to apply", "email or phone", "forgot password", "see who "]):
+            continue
+        if re.search(r"\\b\\d+[+,]?\\s+applicants?\\b", l):
+            continue
+        if re.search(r"\\b(posted|reposted|\\d+\\s+(day|days|hour|hours|week|weeks)\\s+ago)\\b", l):
+            continue
+        if l in {"about the job", "job description", "apply"}:
+            continue
+        cleaned.append(ln)
+
+    txt = "\\n".join(cleaned)
+    txt = re.sub(r"\\n{3,}", "\\n\\n", txt).strip()
+    return txt[:18000]
+
+
+def jd_to_children(jd_text):
+    if not jd_text.strip():
+        return []
+    chunks = []
+    for para in [p.strip() for p in jd_text.split("\\n\\n") if p.strip()]:
+        while len(para) > 1800:
+            chunks.append(para[:1800])
+            para = para[1800:]
+        chunks.append(para)
+    return [
+        {
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {"rich_text": [{"type": "text", "text": {"content": c}}]},
+        }
+        for c in chunks[:80]
+    ]
+
+
 def reject_reason(jd, position):
     txt = (jd + "\n" + position).lower()
     if any(x in txt for x in ["australian citizen", "must be an australian citizen", "permanent resident", "pr required"]):
@@ -162,12 +216,13 @@ def run(args):
             if j["id"] in seen:
                 continue
             seen.add(j["id"])
-            jd = requests.get(f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{j['id']}", headers={"User-Agent": "Mozilla/5.0"}, timeout=25).text
-            reason = reject_reason(jd, j["position"])
+            jd_html = requests.get(f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{j['id']}", headers={"User-Agent": "Mozilla/5.0"}, timeout=25).text
+            reason = reject_reason(jd_html, j["position"])
             if reason:
                 summary["rejected"] += 1
                 summary["rejected_by_reason"][reason] = summary["rejected_by_reason"].get(reason, 0) + 1
                 continue
+            j["jd_text"] = extract_jd_text(jd_html)
             accepted_jobs.append(j)
             summary["accepted"] += 1
             if len(accepted_jobs) >= args.max_accept:
@@ -185,7 +240,8 @@ def run(args):
                 "position": {"rich_text": [{"type": "text", "text": {"content": j["position"][:2000]}}]},
                 "Status": {"status": {"name": "Not started"}},
                 "note": {"rich_text": [{"type": "text", "text": {"content": "accepted by strict filters"}}]}
-            }
+            },
+            "children": jd_to_children(j.get("jd_text", ""))
         }
         r = requests.post("https://api.notion.com/v1/pages", headers=h, data=json.dumps(payload), timeout=30).json()
         if r.get("object") == "page":
